@@ -70,6 +70,7 @@ function fmtDate(iso: string): string {
 
 export default function Home() {
   const [inv, setInv] = useState<Invoice>(DEFAULTS)
+  const [feeRevealed, setFeeRevealed] = useState(false)
   const counter = useRef(3)
   const initialLoadDone = useRef(false)
 
@@ -78,14 +79,21 @@ export default function Home() {
   const dropTarget = useRef<{ id: string; position: 'top' | 'bottom' } | null>(null)
   const [dropIndicator, setDropIndicator] = useState<{ id: string; position: 'top' | 'bottom' } | null>(null)
 
-  // Load full state on mount
+  const MS_24H = 24 * 60 * 60 * 1000
+
+  // Load full state on mount; clear consulting fee if untouched for 24h
   useEffect(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY)
       if (saved) {
-        const data = JSON.parse(saved) as Invoice
+        const data = JSON.parse(saved) as Invoice & { lastInteraction?: number }
+        const stale = data.lastInteraction && (Date.now() - data.lastInteraction > MS_24H)
+        if (stale) {
+          data.items = data.items.map(item =>
+            item.id === 'item-0' ? { ...item, amount: '' } : item
+          )
+        }
         setInv(data)
-        // Ensure counter starts above any existing item ids
         const maxId = data.items.reduce((max, item) => {
           const num = parseInt(item.id.replace('item-', ''), 10)
           return isNaN(num) ? max : Math.max(max, num + 1)
@@ -96,10 +104,10 @@ export default function Home() {
     initialLoadDone.current = true
   }, [])
 
-  // Save full state on every change (skip the very first render before load completes)
+  // Save full state + last interaction timestamp on every change
   useEffect(() => {
     if (!initialLoadDone.current) return
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(inv))
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...inv, lastInteraction: Date.now() }))
   }, [inv])
 
   function set(field: keyof Invoice, value: string) {
@@ -237,14 +245,44 @@ export default function Home() {
                         <span className="px-2 py-1.5 text-xs text-zinc-400 bg-zinc-50 border-r border-zinc-200 select-none flex-shrink-0">
                           {inv.currency}
                         </span>
-                        <input
-                          type="number"
-                          value={item.amount}
-                          onChange={e => updateItem(item.id, 'amount', e.target.value)}
-                          placeholder="0.00"
-                          step="any"
-                          className="flex-1 min-w-0 px-2 py-1.5 text-xs text-zinc-900 placeholder-zinc-300 bg-white focus:outline-none"
-                        />
+                        {item.id === 'item-0' && !feeRevealed ? (
+                          <button
+                            onClick={() => setFeeRevealed(true)}
+                            className="flex-1 min-w-0 px-2 py-1.5 text-xs text-zinc-400 bg-white text-left tracking-widest cursor-pointer hover:bg-zinc-50 transition-colors"
+                          >
+                            ••••••
+                          </button>
+                        ) : (
+                          <input
+                            type="number"
+                            value={item.amount}
+                            onChange={e => updateItem(item.id, 'amount', e.target.value)}
+                            placeholder="0.00"
+                            step="any"
+                            className="flex-1 min-w-0 px-2 py-1.5 text-xs text-zinc-900 placeholder-zinc-300 bg-white focus:outline-none"
+                          />
+                        )}
+                        {item.id === 'item-0' && (
+                          <button
+                            onClick={() => setFeeRevealed(v => !v)}
+                            onMouseDown={e => e.stopPropagation()}
+                            className="px-2 text-zinc-300 hover:text-zinc-500 transition-colors cursor-pointer bg-white flex-shrink-0"
+                            title={feeRevealed ? 'Hide' : 'Reveal'}
+                          >
+                            {feeRevealed ? (
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                                <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                                <line x1="1" y1="1" x2="23" y2="23"/>
+                              </svg>
+                            ) : (
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                <circle cx="12" cy="12" r="3"/>
+                              </svg>
+                            )}
+                          </button>
+                        )}
                       </div>
                     </div>
 
@@ -364,22 +402,29 @@ export default function Home() {
                 </tr>
               </thead>
               <tbody>
-                {inv.items.map(item => (
-                  <tr key={item.id} className="border-b border-zinc-100">
-                    <td className="py-2.5 text-zinc-800">{item.label || '—'}</td>
-                    <td className="py-2.5 text-right text-zinc-800 tabular-nums">
-                      {fmt(item.amount)
-                        ? <><span className="text-zinc-400 text-xs mr-1">{inv.currency}</span>{fmt(item.amount)}</>
-                        : '—'}
-                    </td>
-                  </tr>
-                ))}
+                {inv.items.map(item => {
+                  const isPrivate = item.id === 'item-0' && !feeRevealed
+                  return (
+                    <tr key={item.id} className="border-b border-zinc-100">
+                      <td className="py-2.5 text-zinc-800">{item.label || '—'}</td>
+                      <td className="py-2.5 text-right text-zinc-800 tabular-nums">
+                        {isPrivate
+                          ? <span className="text-zinc-400 tracking-widest">••••••</span>
+                          : fmt(item.amount)
+                            ? <><span className="text-zinc-400 text-xs mr-1">{inv.currency}</span>{fmt(item.amount)}</>
+                            : '—'}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
               <tfoot>
                 <tr>
                   <td className="pt-3 font-semibold text-zinc-900">Total Amount Due</td>
                   <td className="pt-3 text-right font-semibold text-zinc-900 tabular-nums">
-                    {inv.currency}&nbsp;{calcTotal(inv.items)}
+                    {feeRevealed
+                      ? <>{inv.currency}&nbsp;{calcTotal(inv.items)}</>
+                      : <span className="text-zinc-400 tracking-widest">••••••</span>}
                   </td>
                 </tr>
               </tfoot>
