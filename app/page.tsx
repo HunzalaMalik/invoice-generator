@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import { flushSync } from 'react-dom'
 
 const DERQ = {
   name: 'Derq Systems FZ-LLC',
@@ -343,7 +344,12 @@ export default function Home() {
                 : 'derq_invoice'
               const original = document.title
               document.title = slug
-              window.addEventListener('afterprint', () => { document.title = original }, { once: true })
+              // Force-reveal fee so PDF always shows the real value
+              if (!feeRevealed) flushSync(() => setFeeRevealed(true))
+              window.addEventListener('afterprint', () => {
+                document.title = original
+                setFeeRevealed(false)
+              }, { once: true })
               window.print()
             }}
             className="w-full bg-zinc-900 text-white text-sm font-medium py-2.5 rounded-md hover:bg-zinc-700 active:bg-zinc-800 transition-colors cursor-pointer"
